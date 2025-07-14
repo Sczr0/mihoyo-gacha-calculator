@@ -1,15 +1,7 @@
-# =============================================================================
-# FINAL, FULLY-MODIFIED test.py
-# (All fixes and new features included)
-# =============================================================================
-
 import sys
 import json
 import numpy as np # type: ignore
 
-# -----------------------------------------------------------------------------
-# MonteCarloModel (Simulation Engine)
-# -----------------------------------------------------------------------------
 class MonteCarloModel:
     def __init__(self, args):
         self.args = args
@@ -249,6 +241,10 @@ class HSRCharacterLogic(GenshinCharacterLogic):
                 else: return 20
             else: # It's a light cone
                 return 8
+    def _get_win_lose_prob(self, is_g, mg=0):
+    # 覆盖父类的方法，移除明光机制，使用纯粹的56.25/43.75概率
+    # mg参数保留以兼容方法签名，但在此处无实际作用
+        return (1.0, 0.0) if is_g else (0.5625, 0.4375)
 
 class SimpleGachaModel(GachaLogic):
     """Base class for Weapon, Light Cone, and HSR Character (Math) models."""
@@ -295,7 +291,7 @@ class GenshinWeaponModel(SimpleGachaModel):
     def _state_to_index(self, s): return s[0] + s[1] * self.PITY_MAX + (1 if s[2] else 0) * self.PITY_MAX * self.FATE_MAX
     def _get_prob_5_star(self, p):
         pull = p + 1; return 1. if pull >= 80 else (0.007 if pull < 64 else 0.007 + (pull - 63) * 0.07)
-    def _get_win_lose_prob(self, is_g_or_fate_full): return (1.0, 0.0) if is_g_or_fate_full else (0.75, 0.25)
+    def _get_win_lose_prob(self, is_g_or_fate_full): return (1.0, 0.0) if is_g_or_fate_full else (0.375, 0.625)
     def _build_transition_matrix(self):
         A, b = np.identity(self.TOTAL_STATES), np.ones(self.TOTAL_STATES)
         for i in range(self.TOTAL_STATES):
@@ -385,16 +381,13 @@ class HSRLightConeModel(SimpleGachaModel):
                 if p_lose > 0: A[i, self._state_to_index((0, 1))] -= p5 * p_lose
         return A, b
     
-    # Simplified return logic for HSR Light Cones
     def _get_5_star_return(self, is_up, c, rng): return 40
     def _handle_4_star_pull(self, s, r, c, u): s['pity4'] = 0; return 8
 
 MODEL_LOGIC = {
     "genshin-character": GenshinCharacterLogic(),
     "genshin-weapon": GenshinWeaponModel(),
-    # Note: For HSR Characters, simulation uses HSRCharacterModel's detailed methods,
-    # while math expectation uses its simpler matrix methods.
-    "hsr-character": HSRCharacterModel(),
+    "hsr-character": HSRCharacterLogic(),
     "hsr-lightcone": HSRLightConeModel()
 }
 
@@ -403,14 +396,11 @@ if __name__ == "__main__":
         args = json.loads(sys.argv[1])
         mode = args.get('mode', 'expectation')
         
-        # Select the engine based on the mode
         model = MonteCarloModel(args) if mode == 'distribution' else MathematicalModel(args)
         
-        # Run the engine and print result as JSON
         print(json.dumps(model.run()))
         
     except Exception as e:
         import traceback
-        # Print a detailed error to stderr for the JS plugin to catch
         print(f"FATAL SCRIPT ERROR: {e}\n{traceback.format_exc()}", file=sys.stderr)
         sys.exit(1)
