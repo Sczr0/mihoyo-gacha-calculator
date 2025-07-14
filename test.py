@@ -306,6 +306,63 @@ class GenshinWeaponModel(SimpleGachaModel):
     def _update_state_after_win(self, s, wg): s['pity'], s['fatePoint'], s['isGuaranteed'] = 0, 0, False
     def _update_state_after_lose(self, s, wg): s['pity'], s['fatePoint'], s['isGuaranteed'] = 0, min(s.get('fatePoint',0) + 1, self.FATE_MAX - 1), True
 
+class GenshinWeaponLogic(GenshinWeaponModel):
+    """
+    为原神武器池计算返还星辉
+    """
+    def get_one_target_pulls_sim(self, state, rng, collection, up4_c6):
+        pulls, returns_this_run = 0, 0
+        while True:
+            pulls += 1
+            state['pity'] += 1
+            state['pity4'] += 1
+            p5 = self._get_prob_5_star(state['pity'] - 1)
+            
+            # 抽中5星
+            if rng.get() < p5:
+                was_guaranteed = state['isGuaranteed'] or state.get('fatePoint', 0) >= 2
+                p_win, _ = self._get_win_lose_prob(was_guaranteed)
+                is_target = rng.get() < p_win
+                state['pity'], state['pity4'] = 0, 0
+                
+                returns_this_run += self._get_5_star_return(is_target, collection, rng)
+                if is_target:
+                    self._update_state_after_win(state, was_guaranteed)
+                    return pulls, returns_this_run
+                else:
+                    self._update_state_after_lose(state, was_guaranteed)
+            
+            # 抽中4星 (基于10连保底或基础概率)
+            elif state['pity4'] >= 10 or rng.get() < (0.051 / (1 - p5 if p5 < 1 else 0.99)):
+                 returns_this_run += self._handle_4_star_pull(state, rng, collection, up4_c6)
+
+    def _get_5_star_return(self, is_up, c, rng):
+        # 武器池5星只返还10星辉
+        return 10
+
+    def _handle_4_star_pull(self, s, r, c, u):
+        s['pity4'] = 0
+        
+        # 武器池的4星UP概率为75%
+        if s.get('isGuaranteed4', False) or r.get() < 0.75:
+            s['isGuaranteed4'] = False
+            # 获得UP四星武器，返还2星辉
+            return 2
+        else:
+            s['isGuaranteed4'] = True
+            # 歪了，此时可能获得常驻武器或常驻角色
+            # 此处假设角色和武器概率均等 (50/50)
+            NUM_CHARS, NUM_WEAPONS = 39, 18 # 引用原神角色池的常驻数量
+            TOTAL_OFF_BANNER = NUM_CHARS + NUM_WEAPONS
+
+            if r.get() < NUM_CHARS / TOTAL_OFF_BANNER: # 模拟抽到了角色
+                i = f"std_char_{int(r.get() * NUM_CHARS)}"
+                c[i] = c.get(i, 0) + 1
+                if c[i] == 1: return 0      # New: 0 星辉
+                elif c[i] <= 7: return 2  # 1-6命: 2 星辉
+                else: return 5              # 满命后: 5 星辉
+            else: # 模拟抽到了武器
+                return 2
 
 class HSRCharacterModel(SimpleGachaModel):
     PITY_MAX, GUARANTEE_MAX = 90, 2
@@ -384,11 +441,65 @@ class HSRLightConeModel(SimpleGachaModel):
     def _get_5_star_return(self, is_up, c, rng): return 40
     def _handle_4_star_pull(self, s, r, c, u): s['pity4'] = 0; return 8
 
+class HSRLightConeLogic(HSRLightConeModel):
+    """
+    为星铁光锥池提供精细化模拟，以计算返还星芒。
+    """
+    def get_one_target_pulls_sim(self, state, rng, collection, up4_c6):
+        pulls, returns_this_run = 0, 0
+        while True:
+            pulls += 1
+            state['pity'] += 1
+            state['pity4'] += 1
+            p5 = self._get_prob_5_star(state['pity'] - 1)
+            
+            if rng.get() < p5:
+                was_guaranteed = state['isGuaranteed']
+                p_win, _ = self._get_win_lose_prob(was_guaranteed)
+                is_target = rng.get() < p_win
+                state['pity'], state['pity4'] = 0, 0
+                
+                returns_this_run += self._get_5_star_return(is_target, collection, rng)
+                if is_target:
+                    self._update_state_after_win(state, was_guaranteed)
+                    return pulls, returns_this_run
+                else:
+                    self._update_state_after_lose(state, was_guaranteed)
+            
+            elif state['pity4'] >= 10 or rng.get() < (0.066 / (1 - p5 if p5 < 1 else 0.99)):
+                 returns_this_run += self._handle_4_star_pull(state, rng, collection, up4_c6)
+    
+    def _get_5_star_return(self, is_up, c, rng):
+        # 光锥池5星只返还40星芒
+        return 40
+
+    def _handle_4_star_pull(self, s, r, c, u):
+        s['pity4'] = 0
+        
+        if s.get('isGuaranteed4', False) or r.get() < 0.75:
+            s['isGuaranteed4'] = False
+            return 8 # UP四星光锥返还8星芒
+        else:
+            s['isGuaranteed4'] = True
+            # 歪了，可能获得常驻光锥或常驻角色
+            # 假设角色和光锥概率均等
+            NUM_CHARS, NUM_LCS = 22, 29 # 引用星铁角色池的常驻数量
+            TOTAL_OFF_BANNER = NUM_CHARS + NUM_LCS
+
+            if r.get() < NUM_CHARS / TOTAL_OFF_BANNER: # 模拟抽到了角色
+                i = f"std_char_{int(r.get() * NUM_CHARS)}"
+                c[i] = c.get(i, 0) + 1
+                if c[i] == 1: return 0     # New: 0 星芒
+                elif c[i] <= 7: return 8 # 1-6魂: 8 星芒
+                else: return 20            # 满魂后: 20 星芒
+            else: # 模拟抽到了光锥
+                return 8
+
 MODEL_LOGIC = {
     "genshin-character": GenshinCharacterLogic(),
-    "genshin-weapon": GenshinWeaponModel(),
+    "genshin-weapon": GenshinWeaponLogic(),
     "hsr-character": HSRCharacterLogic(),
-    "hsr-lightcone": HSRLightConeModel()
+    "hsr-lightcone": HSRLightConeLogic()
 }
 
 if __name__ == "__main__":

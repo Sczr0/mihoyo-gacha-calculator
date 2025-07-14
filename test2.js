@@ -60,12 +60,6 @@ export class gachaCalc extends plugin {
             return true;
         }
 
-        // 分布模式的特殊功能仅支持角色池
-        if (mode === 'distribution' && args.pool !== 'character') {
-            await this.reply('抱歉，返还物分布和预算概率计算目前仅支持【角色池】。');
-            return true;
-        }
-
         await this.reply(`正在光速计算中，请稍候... (模式: ${mode})`);
         args.mode = mode;
 
@@ -191,7 +185,7 @@ ${this.formatInitialState(args)}
             stateStr += `\n明光计数: ${initialState.mingguangCounter}`;
         }
         if (args.mode === 'distribution' && args.pool === 'character') {
-            stateStr += ` \n UP四星状态: ${args.up4C6 ? '已满命' : '未满命'}`;
+            stateStr += ` \nUP四星状态: ${args.up4C6 ? '已满命' : '未满命'}`;
         }
         return stateStr;
     }
