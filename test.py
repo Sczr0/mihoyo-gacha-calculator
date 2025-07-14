@@ -287,8 +287,8 @@ class SimpleGachaModel(GachaLogic):
     def _handle_4_star_pull(self, s, r, c, u): s['pity4'] = 0; return 2
 
 class GenshinWeaponModel(SimpleGachaModel):
-    PITY_MAX, FATE_MAX = 80, 3 # 0, 1, 2
-    TOTAL_STATES = PITY_MAX * FATE_MAX
+    PITY_MAX, FATE_MAX, GUARANTEE_MAX = 80, 3, 2 # 新增 GUARANTEE_MAX
+    TOTAL_STATES = PITY_MAX * FATE_MAX * GUARANTEE_MAX # <--- 修正计算方式
     zero_state = (0, 0, False)
     
     def _dict_to_tuple(self, d): return (d['pity'], d.get('fatePoint', 0), d['isGuaranteed'])

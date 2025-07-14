@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import os from 'os'; 
 
 // 定义所有合法的游戏和卡池组合，用于前置校验
 const VALID_POOLS = {
@@ -86,15 +87,16 @@ export class gachaCalc extends plugin {
      * @returns {Promise<string>} 返回一个包含JSON结果字符串的Promise
      */
     runPythonCalculator(args) {
-        // 使用Node.js标准模块元数据来定位文件，这是最健壮的方式
         const __filename = fileURLToPath(import.meta.url);
         const __dirname = path.dirname(__filename);
         const pluginRoot = path.join(__dirname, '..');
-        const pyScriptPath = path.join(pluginRoot, 'test.py');
+        const pyScriptPath = path.join(pluginRoot, 'example', 'test.py');
+        const pythonCommand = os.platform() === 'win32' ? 'python' : 'python3';
 
         return new Promise((resolve, reject) => {
             const argsJson = JSON.stringify(args);
-            const pyProcess = spawn('python3', [pyScriptPath, argsJson]);
+            // 动态确定命令
+            const pyProcess = spawn(pythonCommand, [pyScriptPath, argsJson]);
 
             let result = '';
             let errorMessage = '';
@@ -103,7 +105,8 @@ export class gachaCalc extends plugin {
             pyProcess.stderr.on('data', (data) => { errorMessage += data.toString(); });
 
             pyProcess.on('error', (err) => {
-                reject(new Error(`错误：无法启动Python计算核心。\n请确认服务器已安装Python 3和numpy库。\n底层错误: ${err.message}`));
+                // 优化了错误提示
+                reject(new Error(`错误：无法启动Python计算核心。\n请确认服务器已安装Python 3和numpy，并且 '${pythonCommand}' 命令在系统路径中可用。\n底层错误: ${err.message}`));
             });
 
             pyProcess.on('close', (code) => {
