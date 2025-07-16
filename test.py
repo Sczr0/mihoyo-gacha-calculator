@@ -489,17 +489,142 @@ class HSRLightConeLogic(HSRLightConeModel):
             if r.get() < NUM_CHARS / TOTAL_OFF_BANNER: # 模拟抽到了角色
                 i = f"std_char_{int(r.get() * NUM_CHARS)}"
                 c[i] = c.get(i, 0) + 1
-                if c[i] == 1: return 0     # New: 0 星芒
+                if c[i] == 1: return 0 # New: 0 星芒
                 elif c[i] <= 7: return 8 # 1-6魂: 8 星芒
-                else: return 20            # 满魂后: 20 星芒
+                else: return 20 # 满魂后: 20 星芒
             else: # 模拟抽到了光锥
                 return 8
+
+class ZZZCharacterLogic(HSRCharacterModel):
+    def get_one_target_pulls_sim(self, state, rng, collection, up4_c6):
+        pulls, returns_this_run = 0, 0
+        while True:
+            pulls += 1
+            state['pity'] += 1
+            state['pity4'] += 1
+            p5 = self._get_prob_5_star(state['pity'] - 1) 
+            
+            if rng.get() < p5:
+                was_guaranteed = state['isGuaranteed']
+                p_win, _ = self._get_win_lose_prob(was_guaranteed) 
+                is_target = rng.get() < p_win
+                state['pity'], state['pity4'] = 0, 0
+                
+                returns_this_run += self._get_5_star_return(is_target, collection, rng)
+                if is_target:
+                    self._update_state_after_win(state, was_guaranteed)
+                    return pulls, returns_this_run
+                else:
+                    self._update_state_after_lose(state, was_guaranteed)
+
+            elif state['pity4'] >= 10 or rng.get() < (0.094 / (1 - p5 if p5 < 1 else 0.99)):
+                 returns_this_run += self._handle_4_star_pull(state, rng, collection, up4_c6)
+    
+    def _get_5_star_return(self, is_up, c, rng):
+        NUM_STANDARD_5_STARS = 6
+        agent_key = ""
+        if is_up:
+            agent_key = 'up_5_star'
+        else:
+            agent_index = int(rng.get() * NUM_STANDARD_5_STARS)
+            agent_key = f"std_5_star_{agent_index}"
+
+        c[agent_key] = c.get(agent_key, 0) + 1
+        
+        if c[agent_key] == 1: return 0
+        elif c[agent_key] <= 7: return 40
+        else: return 100
+        
+    def _handle_4_star_pull(self, s, r, c, u):
+        s['pity4'] = 0
+        
+        # 50% 概率获得 UP A级
+        if s.get('isGuaranteed4', False) or r.get() < 0.5:
+            s['isGuaranteed4'] = False
+            return 20 if u else 8
+        else:
+            # 歪了，获得常驻 A级代理人 或 A级音擎
+            s['isGuaranteed4'] = True
+            PROB_AGENT = 7.05 / (7.05 + 2.35)
+            NUM_STANDARD_A_AGENTS = 12
+
+            if r.get() < PROB_AGENT: # 获得常驻A级代理人
+                # 动态追踪每个常驻角色的获取次数
+                i = f"std_char_{int(r.get() * NUM_STANDARD_A_AGENTS)}"
+                c[i] = c.get(i, 0) + 1
+                if c[i] == 1: return 0
+                elif c[i] <= 7: return 8
+                else: return 20
+            else: # 获得A级音擎
+                return 8
+
+class ZZZWeaponLogic(HSRLightConeModel):
+
+    def _get_prob_5_star(self, p):
+        pull = p + 1
+        if pull >= 80: return 1.0
+        # 64抽后 (即第65抽) 开始提升概率
+        if pull < 65: return 0.01 
+        return 0.01 + (pull - 64) * 0.061875
+    
+    def _get_win_lose_prob(self, is_g):
+        return (1.0, 0.0) if is_g else (0.75, 0.25)
+
+    def get_one_target_pulls_sim(self, state, rng, collection, up4_c6):
+        pulls, returns_this_run = 0, 0
+        while True:
+            pulls += 1
+            state['pity'] += 1
+            state['pity4'] += 1
+            p5 = self._get_prob_5_star(state['pity'] - 1)
+            
+            if rng.get() < p5:
+                was_guaranteed = state['isGuaranteed']
+                p_win, _ = self._get_win_lose_prob(was_guaranteed)
+                is_target = rng.get() < p_win
+                state['pity'], state['pity4'] = 0, 0
+                
+                returns_this_run += 40
+                if is_target:
+                    self._update_state_after_win(state, was_guaranteed)
+                    return pulls, returns_this_run
+                else:
+                    self._update_state_after_lose(state, was_guaranteed)
+            
+            elif state['pity4'] >= 10 or rng.get() < (0.15 / (1 - p5 if p5 < 1 else 0.99)):
+                 returns_this_run += self._handle_4_star_pull(state, rng, collection, up4_c6)
+    
+    def _get_5_star_return(self, is_up, c, rng):
+        return 40
+
+    def _handle_4_star_pull(self, s, r, c, u):
+        s['pity4'] = 0
+        
+        if s.get('isGuaranteed4', False) or r.get() < 0.75:
+            s['isGuaranteed4'] = False
+            return 8
+        else:
+            s['isGuaranteed4'] = True
+            PROB_WEAPON = 13.125 / (13.125 + 1.875)
+            # 常驻A级代理人共12名
+            NUM_STANDARD_A_AGENTS = 12 
+
+            if r.get() < PROB_WEAPON: # 歪出常驻A级音擎
+                return 8
+            else: # 歪出常驻A级代理人
+                i = f"std_char_{int(r.get() * NUM_STANDARD_A_AGENTS)}"
+                c[i] = c.get(i, 0) + 1
+                if c[i] == 1: return 0
+                elif c[i] <= 7: return 8
+                else: return 20
 
 MODEL_LOGIC = {
     "genshin-character": GenshinCharacterLogic(),
     "genshin-weapon": GenshinWeaponLogic(),
     "hsr-character": HSRCharacterLogic(),
-    "hsr-lightcone": HSRLightConeLogic()
+    "hsr-lightcone": HSRLightConeLogic(),
+    "zzz-character": ZZZCharacterLogic(),
+    "zzz-weapon": ZZZWeaponLogic(),
 }
 
 if __name__ == "__main__":

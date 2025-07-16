@@ -6,14 +6,15 @@ import os from 'os';
 // 定义所有合法的游戏和卡池组合，用于前置校验
 const VALID_POOLS = {
     'genshin': ['character', 'weapon'],
-    'hsr': ['character', 'lightcone']
+    'hsr': ['character', 'lightcone'],
+    'zzz': ['character', 'weapon']
 };
 
 export class gachaCalc extends plugin {
     constructor() {
         super({
             name: '抽卡期望计算',
-            dsc: '计算原神/星铁抽卡期望与分布',
+            dsc: '计算原神/星铁/绝区零抽卡期望与分布',
             event: 'message',
             priority: 500,
             rule: [
@@ -52,8 +53,8 @@ export class gachaCalc extends plugin {
         
         // 在调用Python前，进行完整性与有效性校验
         if (!args.game || !args.pool || !VALID_POOLS[args.game]?.includes(args.pool)) {
-            const poolNameMap = { 'character': '角色', 'weapon': '武器', 'lightcone': '光锥' };
-            const gameNameMap = { 'genshin': '原神', 'hsr': '崩坏：星穹铁道' };
+            const poolNameMap = { 'character': '角色', 'weapon': '武器/音擎', 'lightcone': '光锥' };
+            const gameNameMap = { 'genshin': '原神', 'hsr': '崩坏：星穹铁道', 'zzz': '绝区零' };
             const poolName = poolNameMap[args.pool] || args.pool || '未知';
             const gameName = gameNameMap[args.game] || args.game || '未知';
             await this.reply(`错误：【${gameName}】中没有【${poolName}】卡池，请检查输入。`);
@@ -89,20 +90,14 @@ export class gachaCalc extends plugin {
 
         return new Promise((resolve, reject) => {
             const argsJson = JSON.stringify(args);
-            // 动态确定命令
             const pyProcess = spawn(pythonCommand, [pyScriptPath, argsJson]);
-
             let result = '';
             let errorMessage = '';
-
             pyProcess.stdout.on('data', (data) => { result += data.toString(); });
             pyProcess.stderr.on('data', (data) => { errorMessage += data.toString(); });
-
             pyProcess.on('error', (err) => {
-                // 优化了错误提示
                 reject(new Error(`错误：无法启动Python计算核心。\n请确认服务器已安装Python 3和numpy，并且 '${pythonCommand}' 命令在系统路径中可用。\n底层错误: ${err.message}`));
             });
-
             pyProcess.on('close', (code) => {
                 if (code === 0) {
                     resolve(result);
@@ -119,8 +114,8 @@ export class gachaCalc extends plugin {
      * @param {object} data - Python脚本返回的数据
      */
     generateReport(args, data) {
-        const gameName = { 'genshin': '原神', 'hsr': '崩坏：星穹铁道' }[args.game];
-        const poolName = { 'character': 'UP角色', 'weapon': '定轨武器', 'lightcone': 'UP光锥' }[args.pool];
+        const gameName = { 'genshin': '原神', 'hsr': '崩坏：星穹铁道', 'zzz': '绝区零' }[args.game];
+        const poolName = { 'character': 'UP角色', 'weapon': 'UP音擎', 'lightcone': 'UP光锥' }[args.pool];
         const unit = { 'character': '个', 'weapon': '把', 'lightcone': '个' }[args.pool];
         
         let report = `--- 抽卡期望与分布 ---
@@ -153,7 +148,8 @@ ${this.formatInitialState(args)}
         
         if (data.returns) {
             const returnData = data.returns;
-            const returnName = args.game === 'genshin' ? '星辉' : '星芒';
+            const returnNameMap = { 'genshin': '星辉', 'hsr': '星芒', 'zzz': '信号余波' };
+            const returnName = returnNameMap[args.game] || '返还物';
             report += `
 
 【${returnName}返还分析】 (副产物)
@@ -164,8 +160,9 @@ ${this.formatInitialState(args)}
         }
 
         const pinkFates = Math.ceil(pullsData.mean);
-        const starStones = pinkFates * 160;
-        report += `\n\n(期望抽数约等于 ${pinkFates} 抽 或 ${starStones.toLocaleString()} 星琼/原石)`;
+        const starStones = pinkFates * 160; 
+        const currencyName = args.game === 'zzz' ? '菲林' : '星琼/原石';
+        report += `\n\n(期望抽数约等于 ${pinkFates} 抽 或 ${starStones.toLocaleString()} ${currencyName})`;
         return report;
     }
     
@@ -176,16 +173,21 @@ ${this.formatInitialState(args)}
     formatInitialState(args) {
         const { initialState } = args;
         let stateStr = `已垫抽数: ${initialState.pity} 抽\n`;
-        if (args.pool === 'weapon') {
+        
+        if (args.game === 'genshin' && args.pool === 'weapon') {
             stateStr += `命定值: ${initialState.fatePoint} 点`;
-        } else {
+        } else if (args.pool === 'character' || args.pool === 'lightcone' || (args.game === 'zzz' && args.pool === 'weapon')) {
+            // 对于所有角色池、光锥池、以及ZZZ的音擎池，都显示大小保底
             stateStr += `保底状态: ${initialState.isGuaranteed ? '大保底' : '小保底'}`;
         }
+
         if (args.game === 'genshin' && args.pool === 'character') {
             stateStr += `\n明光计数: ${initialState.mingguangCounter}`;
         }
+        
+        // 此逻辑对所有角色池都适用，因为Python端都处理了up4c6参数
         if (args.mode === 'distribution' && args.pool === 'character') {
-            stateStr += ` \nUP四星状态: ${args.up4C6 ? '已满命' : '未满命'}`;
+            stateStr += `\nUP四星状态: ${args.up4C6 ? '已满命' : '未满命'}`;
         }
         return stateStr;
     }
@@ -204,8 +206,9 @@ ${this.formatInitialState(args)}
         tokens.forEach(token => {
             if (['原神', 'genshin'].includes(token.toLowerCase())) args.game = 'genshin';
             else if (['星铁', '崩铁', 'hsr'].includes(token.toLowerCase())) args.game = 'hsr';
+            else if (['绝区零', 'zzz'].includes(token.toLowerCase())) args.game = 'zzz';
             else if (['角色', '人物'].includes(token)) args.pool = 'character';
-            else if (['武器'].includes(token)) args.pool = 'weapon';
+            else if (['武器', '音擎'].includes(token)) args.pool = 'weapon'; // '音擎'也识别为'weapon'
             else if (['光锥'].includes(token)) args.pool = 'lightcone';
             else if (['四星满命', 'up4满命', 'up4c6'].includes(token.toLowerCase())) args.up4C6 = true;
             else if (['大保底', '必出'].includes(token)) args.initialState.isGuaranteed = true;
@@ -215,7 +218,7 @@ ${this.formatInitialState(args)}
             if (budgetMatch) {
                 args.budget = parseInt(budgetMatch[2]);
             } else {
-                const countMatch = token.match(/^(\d+)(个|把|张|命|魂|精)$/);
+                const countMatch = token.match(/^(\d+)(个|把|张|命|魂|精|特写)$/); // 增加了'特写'
                 if (countMatch) args.targetCount = parseInt(countMatch[1]);
                 
                 const pityMatch = token.match(/^(\d+)(抽|垫)$/);
@@ -238,23 +241,27 @@ ${this.formatInitialState(args)}
     showHelp(e) {
         const helpMessage = `--- 抽卡期望计算 帮助 ---
 指令:
-  #期望计算 [参数...]  (快速获取平均值)
-  #期望分布 [参数...]  (获取详细概率分布)
+  #期望计算 [参数...]
+  #期望分布 [参数...]
 
-参数 (顺序随意):
- • 游戏: 原神, 星铁
- • 卡池: 角色, 武器, 光锥
- • 数量: 3个, 6命 (默认1)
+参数 (顺序随意, 用空格隔开):
+ • 游戏: 原神, 星铁, 绝区零 (或zzz)
+ • 卡池: 
+    - 原神: 角色, 武器
+    - 星铁: 角色, 光锥
+    - 绝区零: 角色, 音擎 (或武器)
+ • 数量: 3个, 6命, 1精, 5特写 (默认1)
  • 垫抽: 20抽, 50垫 (默认0)
  • 保底: 大保底, 小保底 (默认小保底)
- • 预算: 预算180抽 (分布模式专用, 计算成功率)
- • 明光: 明光2 (原神角色池专用)(计算方法：自上次小保底不歪开始连续歪了几次)
+ • 预算: 预算180抽 (分布模式专用)
  • 定轨: 定轨1 (原神武器池专用)
+ • 明光: 明光2 (原神角色池专用)
  • 四星满命: (分布模式, 角色池专用)
 
 示例:
- • #期望计算 原神 角色 3个
- • #期望分布 星铁 角色 1个 四星满命 预算150抽
+ • #期望计算 原神 武器 1精 50垫 定轨1
+ • #期望分布 星铁 角色 6魂 大保底 预算1000抽
+ • #期望计算 绝区零 角色 1个 四星满命
 `;
         this.reply(helpMessage);
         return true;
